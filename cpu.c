@@ -13,7 +13,7 @@
 #include <cpuid.h>
 
 
-#define SLEEP_SEC 1
+#define SLEEP_SEC 10
 #define NUM_MULS 100000000
 #define NUM_MALLOCS 1000000
 #define MALLOC_SIZE 1000
