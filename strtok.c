@@ -1,33 +1,18 @@
-#include<stdio.h>
-#include<stdlib.h>
-#include<string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+int main() {
 
+  char str[] = "My name is Tanvir,Rifat";
 
-int main(){
+  char *token = strtok(str, " ,");
 
- char str[] = "My name is Tanvir,Rifat";
+  while (token != NULL) {
 
+    printf("Token %s\n", token);
+    token = strtok(NULL, " ,");
+  }
 
- char *token =  strtok(str," ,");
-
- 
- while(token != NULL){
-
-
-
-        printf("Token %s\n",token);
-        token = strtok(NULL," ,");
-
-
-
-
-
-
- }
-
-
-
- return 0;
-
+  return 0;
 }

@@ -4,9 +4,9 @@
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_CMD 1024
-#define PROMPT "\xf0\x9f\x89\x80 "
-
+#define MAX_PROMPT 1024
+#define PROMPT "\033[1;34m\xf0\x9f\x89\x80\033[0m "
+#define MAX_CMDS 8
 #define MAX_ARGV 256
 #define SEP " \t\n"
 volatile pid_t child_pid = 0;
@@ -24,9 +24,10 @@ void sig_handler(int sig) {
 
 int main() {
 
-  char prompt[MAX_CMD]; // prompt means whole line, ex: ls -lsah or cat foo.txt
-  int argc;
-  char *argv[MAX_ARGV];
+  char prompt[MAX_PROMPT]; // prompt means whole line, ex: ls -lsah or cat
+  int argi, cmdi;
+  char *cmds[MAX_CMDS][MAX_ARGV];
+  char *tok;
 
   signal(SIGINT, sig_handler);
 
@@ -34,7 +35,7 @@ int main() {
 
     printf(PROMPT);
 
-    if (fgets(prompt, MAX_CMD, stdin) == NULL) {
+    if (fgets(prompt, MAX_PROMPT, stdin) == NULL) {
       perror("fgets error");
       exit(1);
     }
@@ -44,38 +45,50 @@ int main() {
       exit(0);
     }
 
-    argc = 0;
+    argi = 0;
+    cmdi = 0;
     // first token:
-    argv[argc] = strtok(prompt, SEP);
+    tok = strtok(prompt, SEP);
 
-    while (argv[argc] != NULL) {
+    while (1) {
+      cmds[cmdi][argi++] = tok;
 
-      argv[++argc] = strtok(NULL, SEP);
+      if (tok == NULL)
+        break;
+
+      tok = strtok(NULL, SEP);
+
+      if (tok && strcmp(tok, "|") == 0) {
+        cmds[cmdi++][argi] = NULL;
+        argi = 0;
+        tok = strtok(NULL, SEP);
+      }
     }
 
-    if (argc == 0) {
+    if (cmds[0][0] == 0) {
 
       continue;
     }
     // builtin shell command help and quit:
-    if (strcmp(argv[0], "help") == 0) {
-
-      printf("Welcome to my shell, builtins are quit,help,searchyt <your song "
-             "name>\n");
+    if (strcmp(cmds[0][0], "help") == 0) {
+      printf("\033[1;32mWelcome to \033[1;36mTANVIR'S SHELL\033[0m, "
+             "\033[1;33mbuiltins\033[0m are \033[1;32mquit\033[0m, "
+             "\033[1;32mhelp\033[0m, \033[1;32msearchyt <your song "
+             "name>\033[0m\n");
 
       continue;
     }
 
-    if (strcmp(argv[0], "quit") == 0) {
+    if (strcmp(cmds[0][0], "quit") == 0) {
 
       exit(1);
     }
 
-    if (strcmp(argv[0], "searchyt") == 0 && argc >= 2) {
+    if (strcmp(cmds[0][0], "searchyt") == 0 && cmds[0][1] != NULL) {
       char query[512] = {0};
-      for (int i = 1; i < argc; ++i) {
-        strcat(query, argv[i]);
-        if (i != argc - 1)
+      for (int i = 1; i < cmds[0][i]; ++i) {
+        strcat(query, cmds[0][i]);
+        if (cmds[0][i + 1] != NULL)
           strcat(query, " ");
       }
 
@@ -99,30 +112,63 @@ int main() {
       child_pid = 0;
       continue;
     }
+
     // using the shell command
 
-    child_pid = fork();
+    int fds[2], in_fd = 0;
 
-    if (child_pid < 0) {
-      perror("Fork Error");
+    for (int i = 0; i <= cmdi; i++) {
 
-      exit(1);
-    }
+      if (i < cmdi) {
 
-    if (child_pid == 0) {
-      // child process
-      if (execvp(argv[0], argv) < 0) {
+        if (pipe(fds) < 0) {
+          perror("pipe error");
+          exit(1);
+        }
+      }
 
-        perror("execvp error");
-        printf("Type \"help\" to see the builtin commands\n");
+      child_pid = fork();
+
+      if (child_pid < 0) {
+
+        perror("Fork error");
         exit(1);
       }
-      exit(1);
+      if (child_pid == 0) {
+
+        // child process
+        if (in_fd != 0) {
+
+          dup2(in_fd, STDIN_FILENO);
+          close(in_fd);
+        }
+
+        if (i < cmdi) {
+          close(fds[0]); // close the read end of the file descriptor
+          dup2(fds[1], STDOUT_FILENO);
+          close(fds[1]);
+        }
+
+        execvp(cmds[i][0], cmds[i]);
+        printf("\033[1;32mType 'help' to see all available builtin "
+               "commands\033[0m\n");
+
+        perror("Execvp error");
+        exit(1);
+      }
+
+      if (in_fd != 0)
+        close(in_fd); // Close prev input
+
+      if (i < cmdi) {
+        close(fds[1]);  // Close write end
+        in_fd = fds[0]; // Read end for next cmd
+      }
     }
-
-    int status;
-
-    waitpid(child_pid, &status, 0);
+    // parent process wait until the child finished it execution
+    while (wait(NULL) > 0)
+      ; // Wait for all children
+    child_pid = 0;
   }
 
   return 0;
