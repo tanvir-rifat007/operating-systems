@@ -7,11 +7,17 @@
 #define MAX_PROMPT 1024
 #define PROMPT "\033[1;34m\xf0\x9f\x89\x80\033[0m "
 #define MAX_CMDS 8
+#define MAX_JOBS 8
 #define MAX_ARGV 256
 #define SEP " \t\n"
+#define STATE_DEFAULT = 0
+#define STATE_STOPPED = 1
+#define STATE_FG = 2
+#define STATE_BG = 3
+
 volatile pid_t child_pid = 0;
 
-void sig_handler(int sig) {
+void sigint_handler(int sig) {
 
   if (!child_pid)
     return;
@@ -20,6 +26,7 @@ void sig_handler(int sig) {
 
     perror("Error Sending Sigint to child\n");
   }
+  return;
 }
 
 int main() {
@@ -29,7 +36,7 @@ int main() {
   char *cmds[MAX_CMDS][MAX_ARGV];
   char *tok;
 
-  signal(SIGINT, sig_handler);
+  signal(SIGINT, sigint_handler);
 
   while (1) {
 
@@ -115,61 +122,53 @@ int main() {
 
     // using the shell command
 
-    int fds[2], in_fd = 0;
+    int fds[2];
+    int infd = 0;
+    int childpids[cmdi + 1];
 
     for (int i = 0; i <= cmdi; i++) {
+      if (i != cmdi) {
+        pipe(fds);
+      }
+      if ((childpids[i] = fork()) < 0) {
+        perror("fork error");
+        exit(1);
+      }
+      // child process:
+      if (childpids[i] == 0) {
 
-      if (i < cmdi) {
+        if (i != cmdi) {
+          dup2(fds[1], 1); // duplicate write end
 
-        if (pipe(fds) < 0) {
-          perror("pipe error");
+          close(fds[1]);
+
+          close(fds[0]);
+        } // this if for ls
+        dup2(infd, 0); // this is for wc
+
+        if (execvp(cmds[i][0], cmds[i]) < 0) {
+
+          perror("exec error");
+          printf("\033[1;32mType 'help' to see all available builtin "
+                 "commands\033[0m\n");
+
           exit(1);
         }
-      }
-
-      child_pid = fork();
-
-      if (child_pid < 0) {
-
-        perror("Fork error");
         exit(1);
       }
-      if (child_pid == 0) {
+      // parent process:
 
-        // child process
-        if (in_fd != 0) {
+      infd = fds[0];
+      if (i != cmdi) {
 
-          dup2(in_fd, STDIN_FILENO);
-          close(in_fd);
-        }
-
-        if (i < cmdi) {
-          close(fds[0]); // close the read end of the file descriptor
-          dup2(fds[1], STDOUT_FILENO);
-          close(fds[1]);
-        }
-
-        execvp(cmds[i][0], cmds[i]);
-        printf("\033[1;32mType 'help' to see all available builtin "
-               "commands\033[0m\n");
-
-        perror("Execvp error");
-        exit(1);
+        close(fds[1]);
       }
-
-      if (in_fd != 0)
-        close(in_fd); // Close prev input
-
-      if (i < cmdi) {
-        close(fds[1]);  // Close write end
-        in_fd = fds[0]; // Read end for next cmd
+      int status;
+      // parent process is beind waited to completed the all child's processes
+      if (waitpid(childpids[i], &status, 0) < 0) {
+        perror("waitpid error");
       }
     }
-    // parent process wait until the child finished it execution
-    while (wait(NULL) > 0)
-      ; // Wait for all children
-    child_pid = 0;
   }
-
   return 0;
 }
